@@ -1,0 +1,10 @@
+{
+  "name": "TQQQ Momentum Scalper",
+  "short_name": "TQQQ Scalper",
+  "description": "5分鐘動能剝頭皮即時訊號",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#10b981",
+  "icons": [{ "src": "icon.svg", "sizes": "512x512", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
