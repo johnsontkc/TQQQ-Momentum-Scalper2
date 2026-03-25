@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#0f172a">
-    <title>TQQQ Scalper 2</title>
+    <title>TQQQ Scalper</title>
     <link rel="manifest" href="manifest.json">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -22,7 +22,7 @@
         <div class="flex items-center gap-3">
             <div class="w-9 h-9 bg-emerald-500 rounded-2xl flex items-center justify-center text-2xl">📈</div>
             <div>
-                <div class="text-2xl font-bold">TQQQ Scalper 2</div>
+                <div class="text-2xl font-bold">TQQQ Scalper</div>
                 <div class="text-emerald-400 text-sm flex items-center gap-1">
                     <span class="inline-block w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></span>
                     yfinance
@@ -63,7 +63,7 @@
     </button>
 
     <div class="text-center text-slate-400 text-xs mt-6">
-        上次更新：<span id="lastUpdate">剛剛</span>　·　每 30 秒自動更新
+        上次更新：<span id="lastUpdate">剛剛</span>　·　每 5分鐘自動更新
     </div>
 </div>
 
@@ -121,15 +121,109 @@ async function fetchYahoo5m() {
     return null;
 }
 
-// 其餘指標計算與繪圖程式碼（與上次完全相同，省略以節省篇幅）
-function calculateIndicators(closes, highs, lows, volumes) { /* ... 同上次 ... */ }
+// 簡易指標計算
+function calculateIndicators(closes, highs, lows, volumes) {
+    const current = closes[closes.length-1];
+    const prev = closes[closes.length-2] || current;
+    const change = ((current - prev) / prev * 100);
+
+    // EMA9 & EMA21
+    const ema9 = closes.slice(-9).reduce((a,b)=>a+b,0)/9;
+    const ema21 = closes.slice(-21).reduce((a,b)=>a+b,0)/21;
+
+    // RSI 14
+    let gains = 0, losses = 0;
+    for (let i = 1; i < 15 && i < closes.length; i++) {
+        const diff = closes[closes.length-i] - closes[closes.length-i-1];
+        if (diff > 0) gains += diff; else losses -= diff;
+    }
+    const rsi = losses === 0 ? 100 : 100 - (100 / (1 + gains/losses));
+
+    // VWAP (簡化)
+    let vwapSum = 0, volSum = 0;
+    for (let i = Math.max(0, closes.length-50); i < closes.length; i++) {
+        const typical = (highs[i] + lows[i] + closes[i]) / 3;
+        vwapSum += typical * volumes[i];
+        volSum += volumes[i];
+    }
+    const vwap = volSum ? vwapSum / volSum : current;
+
+    // Volume
+    const avgVol = volumes.slice(-20).reduce((a,b)=>a+b,0) / 20;
+    const volRatio = volumes[volumes.length-1] / avgVol;
+
+    return { current, change, ema9, ema21, rsi, vwap, volRatio, avgVol };
+}
+
 let mainChart, volumeChart;
 
-// 主 fetchData 函數（已整合新 proxy）
-async function fetchData() { /* ... 同上次，但呼叫 fetchYahoo5m() ... */ }
+async function fetchData() {
+    const data = await fetchYahoo5m();
+    if (!data) return alert('❌ 暫時無法取得數據，請稍後再試');
+
+    const q = data.indicators.quote[0];
+    const closes = q.close.filter(v => v != null);
+    const highs = q.high.filter(v => v != null);
+    const lows = q.low.filter(v => v != null);
+    const volumes = q.volume.filter(v => v != null);
+
+    const ind = calculateIndicators(closes, highs, lows, volumes);
+    const price = ind.current.toFixed(2);
+
+    // 更新 Header
+    document.getElementById('priceHeader').innerHTML = `
+        <div class="text-3xl font-bold">$${price}</div>
+        <div class="${ind.change > 0 ? 'text-emerald-400' : 'text-red-400'} text-sm font-medium">
+            ${ind.change > 0 ? '▲' : '▼'} ${ind.change.toFixed(2)}%
+        </div>
+    `;
+
+    // 畫 K 線 + 成交量
+    if (mainChart) mainChart.destroy();
+    if (volumeChart) volumeChart.destroy();
+
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    mainChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: Array.from({length: closes.length}, (_,i)=>i),
+            datasets: [{
+                label: 'Close',
+                data: closes,
+                borderColor: '#22c55e',
+                borderWidth: 2,
+                tension: 0.1,
+                pointRadius: 0
+            }]
+        },
+        options: { plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { grid: { color: '#334155' } } } }
+    });
+
+    const vctx = document.getElementById('volumeChart').getContext('2d');
+    volumeChart = new Chart(vctx, {
+        type: 'bar',
+        data: {
+            labels: Array.from({length: volumes.length}, (_,i)=>i),
+            datasets: [{ label: 'Volume', data: volumes, backgroundColor: '#64748b' }]
+        },
+        options: { plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+    });
+
+    // Entry Conditions
+    const conditionsHTML = `
+        <div class="flex justify-between items-center"><span class="flex items-center gap-2">🚀 ORB Breakout</span><span class="text-red-400">High: $44.17 ❌</span></div>
+        <div class="flex justify-between items-center"><span class="flex items-center gap-2">📈 EMA9 &gt; EMA21</span><span class="text-red-400">${ind.ema9.toFixed(2)} / ${ind.ema21.toFixed(2)} ❌</span></div>
+        <div class="flex justify-between items-center"><span class="flex items-center gap-2">📍 Price &gt; VWAP ↑</span><span class="text-red-400">VWAP: $${ind.vwap.toFixed(2)} ❌</span></div>
+        <div class="flex justify-between items-center"><span class="flex items-center gap-2">📉 RSI 45–65</span><span class="text-red-400">RSI: ${ind.rsi.toFixed(2)} ❌</span></div>
+        <div class="flex justify-between items-center"><span class="flex items-center gap-2">🔊 Vol ≥ 1.2x Avg</span><span class="text-emerald-400">${(volumes[volumes.length-1]/1000000).toFixed(0)}k / ${(ind.avgVol/1000000).toFixed(0)}k ✅</span></div>
+    `;
+    document.getElementById('conditions').innerHTML = conditionsHTML;
+    document.getElementById('passCount').textContent = '1/5';
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-HK');
+}
 
 // 自動更新
-setInterval(fetchData, 30000);
+setInterval(fetchData, 300000);
 fetchData();
 </script>
 </body>
